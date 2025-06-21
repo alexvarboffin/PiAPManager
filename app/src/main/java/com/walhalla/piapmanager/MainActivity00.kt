@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,8 @@ import com.walhalla.piapmanager.ui.theme.PiAPManagerTheme
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 class MainActivity00 : ComponentActivity() {
@@ -38,15 +41,19 @@ class MainActivity00 : ComponentActivity() {
         setContent {
             PiAPManagerTheme {
 
+
+                val scrollState = rememberScrollState()
+
                 var output by remember { mutableStateOf("") }
 
                 LaunchedEffect(Unit) {
-                    SshSession.runCommandStreamed("ping -c 4 8.8.8.8") { line ->
+                    SshSession.runCommandStreamed("whoami") { line ->
                         output += "$line\n"
                     }
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    println(innerPadding)
 //                    Greeting(
 //                        name = "cccc @@@ $x",
 //                        modifier = Modifier.padding(innerPadding)
@@ -56,7 +63,9 @@ class MainActivity00 : ComponentActivity() {
                     LaunchedEffect(commandToRun) {
                         if (commandToRun != null) {
                             SshSession.runCommandStreamed(commandToRun!!) { line ->
-                                output += "$line\n"
+                                val cleanLine = line.replace(Regex("\u001B\\[[;\\d]*m"), "").trim()
+                                println(cleanLine)
+                                output += "$cleanLine\n"
                             }
                             commandToRun = null
                         }
@@ -76,21 +85,44 @@ class MainActivity00 : ComponentActivity() {
                             Button(onClick = { commandToRun = "reboot" }) {
                                 Text("Reboot")
                             }
+                        }
+
+                        Row(modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth()){
                             Button(onClick = { commandToRun = "top" }) {
                                 Text("System Stats")
                             }
+                            Button(onClick = { commandToRun = "sudo wifite --kill --wps -vv --random-mac -i wlan1 --new-hs" }) {
+                                Text("wifite")
+                            }
+//                            Button(onClick = { commandToRun = "wifite --kill --wps -vv --random-mac -i wlan1 --new-hs" }) {
+//                                Text("wifite")
+//                            }
                         }
-                        Text(
-                                text = output,
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                            .padding(16.dp)
-                            .verticalScroll(rememberScrollState())
-                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(scrollState)
+                                .padding(8.dp)
+                        ) {
+                            Text(text = output)
+                        }
+
+
                     }
 
 
+                }
+
+
+                LaunchedEffect(output) {
+                    // Ждём, пока maxValue обновится
+                    snapshotFlow { scrollState.maxValue }
+                        .filter { it > 0 }
+                        .first()
+                    scrollState.animateScrollTo(scrollState.maxValue)
                 }
             }
         }
@@ -120,8 +152,9 @@ object SshSession {
     fun connect() {
         if (session == null || !session!!.isConnected) {
             val jsch = JSch()
-            session = jsch.getSession("kali", "192.168.1.102", 22).apply {
+            session = jsch.getSession("kali", "192.168.1.187", 22).apply {
                 setPassword("kali")
+
                 setConfig("StrictHostKeyChecking", "no")
                 connect(3000)
             }
@@ -144,6 +177,8 @@ object SshSession {
 
                 channel = session!!.openChannel("exec") as ChannelExec
                 channel.setCommand(command)
+                channel.setErrStream(System.err)
+                channel.setPty(true)
                 channel.inputStream = null
                 val input = channel.inputStream.bufferedReader()
 
